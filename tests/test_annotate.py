@@ -58,7 +58,7 @@ def test_step02_taxon_mode_reuses_term(project):
     eu, t = fake_eutils([("esearch", ESEARCH), ("efetch", XML)])
     assert load_step("02_annotate").main([TAXON], eutils=eu) == 0
     assert "txid46593" in t.urls[0] and "accn" not in t.urls[0]
-    assert "retmax=500" in t.urls[1]
+    assert "retmax=100" in t.urls[1]
 
 
 def test_xml_entity_declaration_rejected():

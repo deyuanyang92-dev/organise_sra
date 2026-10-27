@@ -37,3 +37,26 @@ def test_step03_dedup_ids(project):
     lines = (d / "taxonomy.tsv").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
     assert (d / "taxonomy_missing.txt").read_text().split() == ["5"]
+
+
+def test_step03_cache_skips_network(project):
+    d = project
+    d.mkdir(parents=True)
+    (d / "runinfo.tsv").write_text("Run\tTaxID\nSRR1\t3682672\nSRR3\t46594\n")
+    eu, t = fake_eutils([("efetch", XML)])
+    assert load_step("03_taxonomy").main([TAXON], eutils=eu) == 0
+    first = (d / "taxonomy.tsv").read_text(encoding="utf-8")
+    eu2, t2 = fake_eutils([])                               # 无规则: 任何请求都会报错
+    assert load_step("03_taxonomy").main([TAXON], eutils=eu2) == 0
+    assert t2.urls == [] and (d / "taxonomy.tsv").read_text(encoding="utf-8") == first
+    eu3, t3 = fake_eutils([("efetch", XML)])
+    assert load_step("03_taxonomy").main([TAXON, "--no-cache"], eutils=eu3) == 0 and len(t3.urls) == 1
+
+
+def test_parallel_order_and_rate_limit():
+    from organise_sra.eutils import Eutils
+    waits = []
+    eu = Eutils(transport=lambda u, d=None: u, sleep=waits.append, workers=3)
+    out = eu.map_parallel(lambda i: eu.get("x", {"i": i}), range(9))
+    assert [o.split("i=")[1].split("&")[0] for o in out] == [str(i) for i in range(9)]
+    assert len(waits) >= 7                                    # 9 个请求: 除第一个外都要等间隔

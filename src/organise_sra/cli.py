@@ -7,6 +7,8 @@
   organise-sra download Polynoidae                   # 用 kingfisher 下载 run_list_default.txt, 可断点续跑
   organise-sra download 我的项目 --runs list.txt      # 任意 run 列表 (也可 -r SRR.. / -p PRJNA..)
   organise-sra lineage samples.xlsx --column Run     # 给表/清单补物种名与门–种阶元
+  organise-sra genome Nereididae                     # 整理全基因组组装可用数据 (HiFi/ONT/Hi-C/WGS/RNA), 按物种
+  organise-sra tools --conda-env kingfisher          # 检查下载软件与可用方法
   organise-sra <步骤> -h                              # 各步骤参数
 
 步骤: runinfo(01) annotate(02) taxonomy(03) table(04) select(05); 每步只读上一步的 TSV、只写自己的,
@@ -20,7 +22,7 @@ from . import __version__
 
 STEPS = [("runinfo", "runinfo"), ("annotate", "annotate"), ("taxonomy", "taxonomy"),
          ("table", "table"), ("select", "selection")]
-EXTRA = [("download", "download"), ("lineage", "lineage")]   # 不在 all 里
+EXTRA = [("download", "download"), ("lineage", "lineage"), ("tools", "tools"), ("genome", "genome")]   # 不在 all 里
 ALIAS = {f"{i:02d}": name for i, (name, _) in enumerate(STEPS + EXTRA, start=1)}
 
 

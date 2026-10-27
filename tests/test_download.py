@@ -2,9 +2,10 @@ import gzip
 import json
 import stat
 
+import pytest
 from conftest import TAXON
 
-from organise_sra import download
+from organise_sra import download, tools
 
 # 假 kingfisher: 按 -r 写成对 fastq.gz; run 名含 FAIL 时退出 1; 记录每次调用的参数
 FAKE = """#!/usr/bin/env python3
@@ -49,7 +50,7 @@ def test_download_from_run_list_and_resume(project, tmp_path):
     kf = fake_kf(tmp_path)
     project.mkdir(parents=True)
     (project / "run_list_default.txt").write_text("SRR1\nSRR10\n")
-    assert download.main([TAXON, "--kingfisher", kf]) == 0
+    assert download.main([TAXON, "--kingfisher", kf, "--no-check"]) == 0
     fq = project / "fastq"
     assert sorted(p.name for p in fq.glob("*.gz")) == ["SRR10_1.fastq.gz", "SRR10_2.fastq.gz",
                                                       "SRR1_1.fastq.gz", "SRR1_2.fastq.gz"]
@@ -125,5 +126,67 @@ def test_run_files_and_socks_proxy(tmp_path, monkeypatch):
                                                                                     "SRR1_2.fastq.gz"]
     monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7890/")
     monkeypatch.setenv("https_proxy", "http://127.0.0.1:7890/")
-    env = download.child_env("/x/bin/kingfisher")
+    env = tools.child_env("/x/bin/kingfisher")
     assert "all_proxy" not in env and env["https_proxy"] and env["PATH"].startswith("/x/bin")
+
+
+def fake_env(tmp_path, progs):
+    """假 conda 安装: <base>/envs/kf/bin/ 下放 kingfisher 与给定程序."""
+    b = tmp_path / "conda" / "envs" / "kf" / "bin"
+    b.mkdir(parents=True)
+    for p in ["kingfisher", *progs]:
+        (b / p).write_text("#!/bin/sh\necho 0.5.0\n")
+        (b / p).chmod(0o755)
+    return tmp_path / "conda"
+
+
+def test_conda_env_and_auto_methods(tmp_path, monkeypatch):
+    base = fake_env(tmp_path, ["fasterq-dump", "prefetch", "aria2c", "curl"])
+    monkeypatch.setattr(tools, "CONDA_BASES", (str(base),))
+    monkeypatch.setenv("PATH", "/nonexistent")
+    for k in ("CONDA_EXE", "MAMBA_EXE", "CONDA_PREFIX", "KINGFISHER"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(tools, "ASCP_KEYS", ())
+    kf = tools.find_kingfisher(conda_env="kf")
+    assert kf == str(base / "envs" / "kf" / "bin" / "kingfisher")
+    assert tools.find_kingfisher(str(base / "envs" / "kf")) == kf          # --kingfisher 给环境目录也行
+    info = tools.check(kf, probe=False)
+    assert tools.auto_methods(info) == ["aws-http", "prefetch", "ena-ftp"]
+    assert info["_env"]["CONDA_PREFIX"] == str(base / "envs" / "kf")
+    with pytest.raises(SystemExit, match="找不到 conda 环境"):
+        tools.find_kingfisher(conda_env="nope")
+
+
+def test_ascp_used_only_when_reachable(tmp_path, monkeypatch):
+    base = fake_env(tmp_path, ["fasterq-dump", "curl", "ascp"])
+    key = tmp_path / "aspera_bypass_rsa.pem"
+    key.write_text("k")
+    monkeypatch.setattr(tools, "ASCP_KEYS", (str(key),))
+    kf = str(base / "envs" / "kf" / "bin" / "kingfisher")
+    monkeypatch.setattr(tools, "probe_ascp", lambda *a, **k: False)
+    assert "ena-ascp" not in tools.auto_methods(tools.check(kf))
+    monkeypatch.setattr(tools, "probe_ascp", lambda *a, **k: True)
+    assert tools.auto_methods(tools.check(kf))[0] == "ena-ascp"
+
+
+def test_ascp_key_passed_to_kingfisher(project, tmp_path, monkeypatch):
+    kf = fake_kf(tmp_path)
+    key = tmp_path / "rsa.pem"
+    key.write_text("k")
+    assert download.main([TAXON, "-r", "SRR1", "--kingfisher", kf, "-m", "ena-ascp", "aws-http",
+                          "--ascp-key", str(key), "--dry-run"]) == 0
+    assert f"--ascp-ssh-key {key}" in status(project)["SRR1"]["note"]
+
+
+def test_probe_ascp_needs_real_file_and_caches(tmp_path, monkeypatch):
+    fake = tmp_path / "ascp"
+    fake.write_text("#!/bin/sh\nexit 1\n")                 # 不产生文件 -> 失败
+    fake.chmod(0o755)
+    from conftest import REAL_PROBE_ASCP as probe
+    assert probe(str(fake), "k") is False
+    good = tmp_path / "ascp_ok"
+    good.write_text("#!/bin/sh\nfor a; do d=$a; done; head -c %d /dev/zero > $d/SRR12118866_1.fastq.gz\n"
+                    % tools.PROBE_FILE[1])
+    good.chmod(0o755)
+    assert probe(str(good), "k") is False                    # 6 小时内用缓存
+    assert probe(str(good), "k", refresh=True) is True

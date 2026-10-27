@@ -12,20 +12,23 @@
 import argparse
 import json
 import re
+import time
 from pathlib import Path
 
-from .paths import add_common, data_dir, identity, summary, TODAY
 from .eutils import Eutils, EutilsError, resolve_taxid
 from .parse import parse_runinfo
+from .paths import TODAY, add_common, data_dir, identity, summary
 from .tsv import columns, write_tsv
 
 BATCH = 200
+ACC_BATCH = 70         # --runs: efetch 直接给 run 号, 每批 70 个 (~1 KB, 直连不超 eutils.DIRECT_MAX), 批间并行
 REQUIRED = ["Run", "LibraryStrategy", "bases", "TaxID"]
 ACC = re.compile(r"^[SED]RR\d+$")
 
 
-def fetch(eu, term):
-    r = eu.esearch("sra", term)
+def fetch(eu, term, r=None):
+    """-> (esearch Count, RunInfo 行). r: 已有的 esearch 结果 (复用其 WebEnv, 省一次请求)."""
+    r = r or eu.esearch("sra", term)
     rows = []
     for page in eu.efetch_history("sra", r["webenv"], r["query_key"], r["count"], rettype="runinfo", retmode="text"):
         rows += parse_runinfo(page)
@@ -78,14 +81,13 @@ def main(argv, eutils=None):
         elif a.runs:
             m["mode"] = "runs"
             want, bad = read_runs(a.runs, a.column, a.sheet)
-            rows, total = [], 0
-            for i in range(0, len(want), BATCH):
-                n, got = fetch(eu, " OR ".join(f"{x}[accn]" for x in want[i:i + BATCH]))
-                if len({r["Experiment"] for r in got}) != n:
-                    hard.append(f"批次 {i // BATCH + 1}: 唯一 Experiment {len({r['Experiment'] for r in got})} "
-                                f"!= esearch Count {n}")
-                total += n
-                rows += got
+            rows = []
+            # 按 run 号直接 efetch (每批 1 次请求; 旧做法 esearch accn OR + efetch 要 2 次且请求体大)
+            batches = [want[i:i + ACC_BATCH] for i in range(0, len(want), ACC_BATCH)]
+            for page in eu.map_parallel(lambda b: eu.efetch_ids("sra", b, rettype="runinfo", retmode="text"),
+                                        batches):
+                rows += parse_runinfo(page)
+            total = None
             wanted = set(want)
             rows = [r for r in rows if r["Run"] in wanted]
             got_runs = {r["Run"] for r in rows}
@@ -99,13 +101,15 @@ def main(argv, eutils=None):
             m["taxid"] = a.taxid or resolve_taxid(eu, a.taxon)
             term = f"txid{m['taxid']}[Organism:exp]" + (f" AND ({a.query})" if a.query else "")
             m["term"] = term
-            n = eu.esearch("sra", term)["count"]
-            m["esearch_count"] = n
+            r = eu.esearch("sra", term)
+            n = m["esearch_count"] = r["count"]
             if n > a.max_experiments:
                 print(f"[01_runinfo] {term} 有 {n} 条 experiment, 超过 --max-experiments {a.max_experiments}; "
                       f"确认要全部获取请加大该值")
                 return 2
-            n, rows = fetch(eu, term)
+            n, rows = fetch(eu, term, r)
+            m["history"] = {"webenv": r["webenv"], "query_key": r["query_key"], "count": n,
+                            "time": time.time()}            # 02 annotate 复用, 省一次 esearch
     except EutilsError as e:
         print(f"[01_runinfo] 失败: {e}")
         return 1

@@ -100,9 +100,9 @@ def test_max_experiments_guard(project):
 def test_runs_not_found(project, tmp_path):
     lst = tmp_path / "runs.txt"
     lst.write_text("SRR1\nSRR2\n\nSRR3\nSRR3\nSRR999\n")
-    rc, t = run01([TAXON, "--runs", str(lst)], [("esearch", esearch_json(2)), ("efetch", RUNINFO)])
+    rc, t = run01([TAXON, "--runs", str(lst)], [("efetch", RUNINFO)])
     assert rc == 0
-    assert b"SRR999%5Baccn%5D" in (t.posts[0] or t.urls[0].encode())
+    assert len(t.urls) == 1 and "id=SRR1%2CSRR2%2CSRR3%2CSRR999" in t.urls[0] and "rettype=runinfo" in t.urls[0]
     nf = (project / "runs_not_found.txt").read_text().split()
     assert nf == ["SRR999"]
     assert manifest(project)["not_found"] == 1
@@ -162,20 +162,22 @@ def test_truncated_runinfo_page_is_retried():
     assert list(eu.efetch_history("sra", "W", "1", 1, rettype="runinfo", retmode="text")) == [RUNINFO]
 
 
-def test_runs_mode_checks_experiment_count(project, tmp_path):
+def test_runs_mode_batches_in_parallel(project, tmp_path):
+    from organise_sra.runinfo import ACC_BATCH
     lst = tmp_path / "runs.txt"
-    lst.write_text("SRR1\nSRR3\n")
-    rc, _ = run01([TAXON, "--runs", str(lst)], [("esearch", esearch_json(5)), ("efetch", RUNINFO)])
-    assert rc == 1 and any("Experiment" in p for p in manifest(project)["problems"])
+    lst.write_text("".join(f"SRR{i}\n" for i in range(1, ACC_BATCH * 2 + 2)))
+    rc, t = run01([TAXON, "--runs", str(lst)], [("efetch", RUNINFO)])
+    assert len(t.urls) == 3 and not any("esearch" in u for u in t.urls)
+    assert all(len(u) < 1200 for u in t.urls)                     # 直连不超 DIRECT_MAX
 
 
 def test_runs_case_and_invalid(project, tmp_path):
     lst = tmp_path / "runs.txt"
     lst.write_text("srr1\nSRR2,SRR3\nSRX99\n")
-    rc, t = run01([TAXON, "--runs", str(lst)], [("esearch", esearch_json(2)), ("efetch", RUNINFO)])
+    rc, t = run01([TAXON, "--runs", str(lst)], [("efetch", RUNINFO)])
     assert rc == 0
     assert (project / "runs_not_found.txt").read_text().split() == ["SRX99"]
-    assert b"SRX99" not in (t.posts[0] or t.urls[0].encode())
+    assert "SRX99" not in t.urls[0]
 
 
 def test_runinfo_file_without_required_columns(project, tmp_path):

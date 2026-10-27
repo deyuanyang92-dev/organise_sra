@@ -9,14 +9,16 @@ import argparse
 import csv
 import io
 import json
+import time
 from pathlib import Path
 
-from .paths import add_common, data_dir, identity, summary
 from .eutils import Eutils, EutilsError
 from .parse import parse_sra_packages
+from .paths import add_common, data_dir, identity, summary
 from .tsv import columns, read_tsv, write_tsv
 
-BATCH = 200
+ACC_BATCH = 70     # 同 runinfo.ACC_BATCH
+XML_PAGE = 100     # 2026-10-28 实测 Polynoidae 525 run, 3 路并行: 每页 500 用 7.8 s, 200 用 5.5 s, 100 用 4.3 s, 50 用 6.0 s
 KF_DROP = {"organisation_contact_name", "organisation_contact_email"}      # 同内置: 不取联系人
 
 
@@ -56,15 +58,24 @@ def main(argv, eutils=None):
         if a.kingfisher:
             rows = read_kingfisher(a.kingfisher)
         elif manifest.get("mode") == "taxon" and manifest.get("term"):
-            # 类群模式: 复用 01 的检索式, 每页 500 (比按 accession 分批快约一倍)
-            r = eu.esearch("sra", manifest["term"])
-            for page in eu.efetch_history("sra", r["webenv"], r["query_key"], r["count"], page=500):
+            # 类群模式: 复用 01 的检索 (WebEnv 1 小时内有效, 否则重新 esearch), 每页 XML_PAGE, 页间并行
+            h = manifest.get("history") or {}
+            pages = None
+            if h.get("webenv") and time.time() - h.get("time", 0) < 3600:
+                try:
+                    pages = eu.efetch_history("sra", h["webenv"], h["query_key"], h["count"], page=XML_PAGE)
+                except EutilsError:
+                    pages = None
+            if pages is None:
+                r = eu.esearch("sra", manifest["term"])
+                pages = eu.efetch_history("sra", r["webenv"], r["query_key"], r["count"], page=XML_PAGE)
+            for page in pages:
                 rows += parse_sra_packages(page)
         else:
-            for i in range(0, len(runs), BATCH):
-                r = eu.esearch("sra", " OR ".join(f"{x}[accn]" for x in runs[i:i + BATCH]))
-                for page in eu.efetch_history("sra", r["webenv"], r["query_key"], r["count"], page=BATCH):
-                    rows += parse_sra_packages(page)
+            # 按 run 号直接 efetch XML, 每批 ACC_BATCH 个, 批间并行
+            for page in eu.map_parallel(lambda b: eu.efetch_ids("sra", b),
+                                        [runs[i:i + ACC_BATCH] for i in range(0, len(runs), ACC_BATCH)]):
+                rows += parse_sra_packages(page)
     except EutilsError as e:
         print(f"[02_annotate] 失败: {e}")
         return 1

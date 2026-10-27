@@ -20,7 +20,16 @@ kingfisher get -r SRR12118866 -m aws-http -f fastq.gz # 测试
 
 其他方式：Docker `docker run -v $(pwd):/data wwood/kingfisher:<tag> get -r SRR12118866 -m ena-ftp`；开发版用 pixi（上游已从 conda 环境文件迁到 pixi）。
 
-`organise-sra download` 自动寻找 kingfisher：`--kingfisher` → `$KINGFISHER` → PATH → `~/miniforge3/envs/kingfisher/bin/kingfisher`（以及 mambaforge/miniconda3/anaconda3）。**不需要先 `conda activate`**：会把该环境的 bin 放到 PATH 最前，保证 fasterq-dump、aria2c、pigz 用同一环境的版本。
+`organise-sra download` 寻找 kingfisher 的顺序：`--kingfisher`（可执行文件或环境目录）→ `--conda-env 名字`（在 `$CONDA_EXE`、`~/miniforge3`、`~/mambaforge`、`~/miniconda3`、`~/anaconda3`、`/opt/conda` 下的 `envs/` 中找）→ `$KINGFISHER` → 当前 PATH → 各 conda 安装下名为 `kingfisher` 的环境。**不需要先 `conda activate`**：会把该环境的 bin 放到 PATH 最前并设 `CONDA_PREFIX`（相当于激活），保证 fasterq-dump、aria2c、pigz 用同一环境的版本；`~/.aspera/sdk`（ascp）也加入 PATH。
+
+```bash
+organise-sra tools                          # 检查: kingfisher 版本、各程序、ascp 试下载、可用方法
+organise-sra tools --conda-env kingfisher   # 指定环境;  --kingfisher /path/to/env 亦可
+organise-sra tools --reprobe                # 重新试 ascp (例如刚打开代理软件的 TUN 模式)
+organise-sra download 项目 --runs list.txt --conda-env kingfisher
+```
+
+不给 `-m` 时 download 会先做同样的检查，按 **ena-ascp → aws-http → prefetch → ena-ftp** 取所需程序齐全的方法（`aws-http` 要 aria2c 或 curl + fasterq-dump，`prefetch` 要 prefetch + fasterq-dump，`ena-ftp` 要 curl 或 aria2c）。ena-ascp 只有在 ascp、可用私钥都在，且**真实试下载一个 4 MB 文件 2 次都成功**时才启用（结果缓存 6 小时于 `~/.cache/organise_sra/ascp_probe.json`），并自动传 `--ascp-ssh-key`（见 §6 问题 4）。`--no-check` 跳过检查。
 
 ### 0.5.0 相对 0.4.1 的变化
 
@@ -38,7 +47,7 @@ kingfisher get -r SRR12118866 -m aws-http -f fastq.gz # 测试
 | `aws-http` | AWS 开放数据 .sra（aria2c 多线程）→ fasterq-dump | 免费；本机最快 |
 | `prefetch` | NCBI prefetch .sra → fasterq-dump | 稳；kingfisher 默认取消 20 GB 上限 |
 | `ena-ftp` | ENA 直接 fastq.gz（curl / aria2c） | 不需 fasterq-dump；国内常较慢 |
-| `ena-ascp` | ENA fastq.gz，Aspera | 需 ascp 和 33001 端口直连；**本机经代理连不上** |
+| `ena-ascp` | ENA fastq.gz，Aspera（UDP，FASP 协议） | 网络好时最快；需 ascp、RSA 私钥、33001 端口 TCP+UDP 直连；**本机 SSH 握手常被干扰，见 §6** |
 | `aws-cp` | `aws s3 cp` .sra | 通常免费 |
 | `gcp-cp` | Google Cloud | **需付费账号**，`--allow-paid` |
 | `ngdc-http` / `ngdc-ascp` | NGDC/GSA，CRR 号 | 0.5.0 新增，实验性 |
@@ -50,9 +59,9 @@ kingfisher get -r SRR12118866 -m aws-http -f fastq.gz # 测试
 | aws-http | 成功，md5 OK | 18 s（另一次 102 s，波动大） |
 | prefetch | 成功 | 27 s |
 | ena-ftp | 成功，md5 OK | 102 s |
-| ena-ascp | 失败：`ascp: Unable to connect via SSH` | — |
+| ena-ascp | 2026-10-28 共 12 次：直连成功 2 次（4 MB 用 20 s），其余 `Unable to connect via SSH`；经代理全部失败 | — |
 
-因此 `organise-sra download` 默认 `-m aws-http prefetch ena-ftp`。旧脚本默认 `aws-http aws-cp gcp-cp ena-ascp ena-ftp prefetch`，需要时用 `-m` 显式写出。
+因此本机自动检查后用 `-m aws-http prefetch ena-ftp`。旧脚本默认 `aws-http aws-cp gcp-cp ena-ascp ena-ftp prefetch`，需要时用 `-m` 显式写出。
 
 输出格式 `-f`：`fastq.gz`（默认）、`fastq`、`fasta`、`fasta.gz`、`sra`；给多个时 kingfisher 选转换最少的。
 
@@ -82,6 +91,8 @@ organise-sra download 我的项目 -p PRJNA621514 SRP260223                   # 
   --dry-run               只打印 kingfisher 命令
   --retries 1             失败重试次数
   --min-free-gb 50        磁盘剩余低于此值不再开始新下载
+  --conda-env kingfisher  kingfisher 所在 conda 环境 (自动激活; 或 --kingfisher 路径)
+  --no-check              不检查软件, 直接用 -m 或默认方法
   --kingfisher-args '--allow-paid'   其余参数原样传给 kingfisher get
 ```
 
@@ -142,12 +153,18 @@ rule kingfisher:
 3. **`ascli config ascp install` 报 `SSL_connect ... unexpected eof while reading`**
    原因：ascli（Ruby）不读 `https_proxy`，直连 GitHub/IBM 被墙。
    解决：`ascli config ascp install --http-proxy=http://127.0.0.1:7890`，装到 `~/.aspera/sdk/ascp`（Transfer SDK 4.4.8）。
-4. **`ena-ascp` 失败：`ascp: Unable to connect via SSH`**
-   原因：ascp 走 TCP 33001 + UDP，不经 http 代理；本机网络直连 fasp.sra.ebi.ac.uk:33001 不通。
-   解决：本机不用 ena-ascp（已从默认方法去掉）；在能直连 ENA 的机器上可 `-m ena-ascp aws-http`。
+4. **`ena-ascp` 失败（2026-10-28 逐层排查）**
+   - **密钥**：kingfisher 自带的 `asperaweb_id_dsa.openssh`（DSA）被 EBI 拒绝（`ssh -v` 显示 `Permission denied (publickey,password)`；ascp 报 `failed to authenticate`）。Aspera Transfer SDK 的 **`~/.aspera/sdk/aspera_bypass_rsa.pem`** 认证成功（`ascli config ascp info` 列出其路径，首次运行该命令时生成）。→ download 自动传 `--ascp-ssh-key ~/.aspera/sdk/aspera_bypass_rsa.pem`。
+   - **直连**：TCP 33001 每次都通、SSH 横幅正常，但 ascp 日志（`ascp -DD -L 目录`）显示约 3/4 次卡在 `Key Ex: Initiating curve25519`，45 s 后 `SSH connection startup failed` → `Unable to connect via SSH`。参数无关（`-QT`/`-T`/`-k 2` 都有成功和失败）。成功时数据走 UDP 正常（4 MB 20 s）。判断：跨境 SSH 握手被随机干扰。
+   - **经代理**：系统 ssh 用 `ProxyCommand nc -X connect -x 127.0.0.1:7890` 每次都能认证；用 proxychains-ng 只把 ascp 的 TCP 送进 FlClash 后 SSH 也稳定，但随后 `Client unable to connect to server (check UDP port and firewall)`：EBI 把 UDP 数据发往 SSH 来源 IP（代理出口），所以 TCP 走代理、UDP 直连的混合方式不可行。
+   - **结论**：ascp 要稳定，只能 TCP 和 UDP 都走同一路径——直连质量好的网络，或代理软件开 **TUN（虚拟网卡）模式**（FlClash 设置里打开）后 `organise-sra tools --reprobe`。否则每个 run 会白等约 50 s 才退到 aws-http，所以检查不通过就不启用 ena-ascp。
+   - 端口探测不可靠：只测 33001 横幅会误判为可用，因此 tools 改为真实试下载。
 5. **mamba 升级时 `libstdcxx ... files were already present`** 警告：conda-forge 包间文件重叠，升级后 kingfisher 0.5.0 正常运行，可忽略。
 6. **旧脚本问题（已在 download 中修正）**：`kingfisher_batchv1.py` 在线程里 `sys.exit()` 只结束该线程，失败不会被汇总；`--run-identifiers-list` 分支漏传 md5 选项；V1/V2 检查只认 `.fastq`，`fastq.gz` 下载后被当成缺失；V2 用 `cwd=` 而不能指定 `--output-directory`（0.4.0 前的限制）。
 7. **`--output-directory` 两级以上不存在时 kingfisher 报错**（它只建一级）。download 事先 `mkdir -p`。
+8. **直连 NCBI E-utilities 时较大的请求卡 20 s 后 `HTTP Error 408: Request Timeout`**（2026-10-28，taxonomy 并行 200 个 TaxID 时出现）
+   原因：本机直连 NCBI 时，请求体（POST）或 URL（GET）超过约 1.3 KB 就发不出去（1300 B 正常、1400 B 起必卡；响应再大都没问题），像路径 MTU 黑洞。经代理没有此问题，但每个请求固定多 ~3.5 s。
+   解决：eutils 默认 auto：小请求直连、>1200 B 走代理（`DIRECT_MAX`）；taxonomy 每批 100 个 TaxID、`--runs` 每批 70 个 run 号，都控制在 1.2 KB 内；直连失败 2 次后该请求改走代理。`--ncbi-proxy direct|env` 可强制。
 
 ## 7. 用户旧脚本对照（2026-10-28 盘点）
 

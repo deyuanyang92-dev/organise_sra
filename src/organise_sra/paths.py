@@ -13,6 +13,8 @@ def add_common(p):
     p.add_argument("--report-dir", help="Excel 输出目录, 默认同 --outdir")
     p.add_argument("--email", help="NCBI 联系邮箱 (也可用 NCBI_EMAIL)")
     p.add_argument("--api-key", help="NCBI API key, 有 key 快 3 倍 (也可用 NCBI_API_KEY)")
+    p.add_argument("--ncbi-proxy", choices=["auto", "direct", "env"],
+                   help="连 NCBI: auto 先试直连 (默认), direct 不走代理, env 用 http(s)_proxy (也可 ORGANISE_SRA_PROXY)")
 
 
 def data_dir(a):
@@ -30,6 +32,9 @@ def report_dir(a):
 
 
 def identity(a):
+    if getattr(a, "ncbi_proxy", None):
+        import os
+        os.environ["ORGANISE_SRA_PROXY"] = a.ncbi_proxy
     return load_identity(a.email, a.api_key)
 
 

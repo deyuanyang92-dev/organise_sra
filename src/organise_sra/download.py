@@ -19,7 +19,6 @@ import argparse
 import datetime
 import gzip
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -29,37 +28,17 @@ from pathlib import Path
 
 from .paths import add_common, data_dir, identity, summary
 from .runinfo import ACC, read_runs
+from .tools import auto_methods, check, find_kingfisher, report
 from .tsv import write_tsv
 
-# 2026-10-28 本机实测 (SRR12118866, 2×~4.5 MB, 经 http 代理): aws-http 18 s, prefetch 27 s, ena-ftp 102 s,
-# ena-ascp 失败 (33001 端口 SSH 连不上). 顺序 = 依次尝试直到成功, 详见 docs/kingfisher.md
-DEFAULT_METHODS = ["aws-http", "prefetch", "ena-ftp"]
+# 不给 -m 时自动: 检查各方法所需程序 (tools.py), 按 ena-ascp > aws-http > prefetch > ena-ftp 取可用的;
+# ena-ascp 只在 ascp + 可用密钥 + EBI 33001 可达时加入. 2026-10-28 本机实测 (SRR12118866, 经 http 代理):
+# aws-http 18 s, prefetch 27 s, ena-ftp 102 s, ena-ascp 直连被阻断. 详见 docs/kingfisher.md
+DEFAULT_METHODS = ["aws-http", "prefetch", "ena-ftp"]      # 检查失败时的回退
 OLD_METHODS = ["aws-http", "aws-cp", "gcp-cp", "ena-ascp", "ena-ftp", "prefetch"]   # 旧脚本默认
 METHODS = ["aws-http", "prefetch", "aws-cp", "gcp-cp", "ena-ascp", "ena-ftp", "ngdc-ascp", "ngdc-http"]
 FORMATS = ["sra", "fastq", "fastq.gz", "fasta", "fasta.gz"]
 STATUS_COLS = ["Run", "status", "method", "seconds", "size_Gb", "files", "note"]
-
-
-def find_kingfisher(path=None):
-    """-> kingfisher 可执行文件路径. 顺序: --kingfisher, $KINGFISHER, PATH, conda 环境 kingfisher."""
-    cands = [path, os.environ.get("KINGFISHER"), shutil.which("kingfisher")]
-    for base in ("~/miniforge3", "~/mambaforge", "~/miniconda3", "~/anaconda3", os.environ.get("CONDA_PREFIX", "")):
-        if base:
-            cands.append(str(Path(base).expanduser() / "envs" / "kingfisher" / "bin" / "kingfisher"))
-    for c in cands:
-        if c and Path(c).is_file() and os.access(c, os.X_OK):
-            return os.path.abspath(c)
-    return None
-
-
-def child_env(kf):
-    """kingfisher 所在 bin 放到 PATH 最前 (fasterq-dump/aria2c/pigz 同环境); 去掉 aria2c 不支持的 socks all_proxy."""
-    env = dict(os.environ)
-    env["PATH"] = str(Path(kf).parent) + os.pathsep + env.get("PATH", "")
-    for k in ("all_proxy", "ALL_PROXY"):
-        if env.get(k, "").lower().startswith("socks"):
-            env.pop(k)
-    return env
 
 
 def run_files(d, run, formats):
@@ -123,6 +102,8 @@ def build_cmd(kf, run, a, fq, force):
         cmd.append("--check-md5sums")
     if force:
         cmd.append("--force")
+    if "ena-ascp" in a.methods and a.ascp_key and "--ascp-ssh-key" not in a.kingfisher_args:
+        cmd += ["--ascp-ssh-key", a.ascp_key]
     return cmd + a.kingfisher_args.split()
 
 
@@ -209,15 +190,19 @@ def main(argv):
     src.add_argument("-p", "--bioprojects", nargs="+", help="BioProject / SRP 号, 先查出全部 run")
     src.add_argument("--exclude", help="已下载 run 列表 (每行第一列), 跳过 (同旧脚本 --compared-files)")
     kfo = p.add_argument_group("kingfisher 选项")
-    kfo.add_argument("-m", "--methods", nargs="+", default=DEFAULT_METHODS, choices=METHODS,
-                     help=f"依次尝试的下载方法 [{' '.join(DEFAULT_METHODS)}]; 旧脚本默认: {' '.join(OLD_METHODS)}")
+    kfo.add_argument("-m", "--methods", nargs="+", choices=METHODS,
+                     help="依次尝试的下载方法 [自动: 检查软件后按 ena-ascp aws-http prefetch ena-ftp 取可用的]; "
+                          f"旧脚本默认: {' '.join(OLD_METHODS)}")
     kfo.add_argument("-f", "--formats", nargs="+", default=["fastq.gz"], choices=FORMATS,
                      help="可接受的输出格式, 给多个时尽量少转换 [fastq.gz]")
     kfo.add_argument("-j", "--jobs", type=int, default=4, help="同时下载的 run 数 [4]")
     kfo.add_argument("--download-threads", type=int, default=8, help="每个 run 的下载连接数, 上限 16 [8]")
     kfo.add_argument("-t", "--extraction-threads", type=int, default=8, help="fasterq-dump/pigz 线程 [8]")
     kfo.add_argument("--no-md5", action="store_true", help="不校验 md5 (默认校验; 同旧脚本 --disable-md5)")
-    kfo.add_argument("--kingfisher", help="kingfisher 路径 [自动: PATH 或 ~/miniforge3/envs/kingfisher]")
+    kfo.add_argument("--conda-env", "--conda_env", help="kingfisher 所在 conda 环境名或目录 (自动激活) [自动找 kingfisher]")
+    kfo.add_argument("--kingfisher", help="kingfisher 可执行文件或其环境目录 [自动: $KINGFISHER, PATH, <conda>/envs/kingfisher]")
+    kfo.add_argument("--ascp-key", help="ascp 私钥 [自动: ~/.aspera/sdk/aspera_bypass_rsa.pem]")
+    kfo.add_argument("--no-check", action="store_true", help="不检查软件/网络, 直接用 -m 或默认方法")
     kfo.add_argument("--kingfisher-args", default="", help="原样追加给 kingfisher get 的参数, 如 '--allow-paid'")
     run = p.add_argument_group("运行")
     run.add_argument("--fastq-dir", help="下载目录 [<outdir>/fastq]")
@@ -255,17 +240,26 @@ def main(argv):
     if bad:
         print(f"[06_download] 忽略 {len(bad)} 个非 SRR/ERR/DRR 条目: {' '.join(bad[:5])}")
 
-    kf = None
+    kf, env = None, None
+
     if not a.check_only:
-        kf = find_kingfisher(a.kingfisher)
+        kf = find_kingfisher(a.kingfisher, a.conda_env)
         if not kf:
-            print("[06_download] 找不到 kingfisher. 安装: mamba create -n kingfisher -c conda-forge -c bioconda "
-                  "kingfisher, 或用 --kingfisher 指定路径 (见 docs/kingfisher.md)")
+            print("[06_download] 找不到 kingfisher. 安装: bash scripts/install_kingfisher.sh, 或 mamba create -n "
+                  "kingfisher -c conda-forge -c bioconda kingfisher; 已装在别处用 --conda-env / --kingfisher")
             return 1
+        info = check(kf, probe=not a.no_check and not a.methods and not a.dry_run)
+        env = info["_env"]
+        a.ascp_key = a.ascp_key or info["ascp_key"]
+        if not a.methods:
+            a.methods = (auto_methods(info) if not a.no_check else []) or DEFAULT_METHODS
+        print("[06_download] " + "\n   ".join(report(info)[:3]) + f"\n   使用方法: {' '.join(a.methods)}")
+        if not info["methods_ok"]:
+            print("[06_download] 警告: 没有检查到可用下载方法所需的程序 (fasterq-dump/curl/aria2c)")
+    a.methods = a.methods or DEFAULT_METHODS
     fq = Path(a.fastq_dir) if a.fastq_dir else d / "fastq"
     for sub in ("", ".done", "logs"):
         (fq / sub).mkdir(parents=True, exist_ok=True)
-    env = child_env(kf) if kf else None
     hist = d / "download_history.tsv"
     if not hist.exists():
         hist.write_text("time\tRun\tevent\tmethod\tseconds\tnote\n")

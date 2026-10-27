@@ -44,6 +44,18 @@ def fake_eutils(rules):
     return Eutils(transport=t, sleep=lambda s: None), t
 
 
+import organise_sra.tools as _tools  # noqa: E402
+
+REAL_PROBE_ASCP = _tools.probe_ascp
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cache(tmp_path, monkeypatch):
+    """测试不读写用户的 ~/.cache/organise_sra, 不做真实 ascp 试下载."""
+    monkeypatch.setenv("ORGANISE_SRA_CACHE", str(tmp_path / "_cache"))
+    monkeypatch.setattr(_tools, "probe_ascp", lambda *a, **k: False)
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """在临时目录运行; 步骤默认输出到 ./<taxon>_sra."""
