@@ -203,6 +203,8 @@ def main(argv):
     src = p.add_argument_group("输入 (任选其一; 都不给则用 <outdir>/run_list_<tag>.txt)")
     src.add_argument("--tag", default="default", help="select 步骤的 --tag [default]")
     src.add_argument("--runs", help="run 列表文件, 一行一个 (同旧脚本 --SRA_lists / --run-identifiers-list)")
+    src.add_argument("--column", help="--runs 为表格 (TSV/CSV/xlsx) 时 run 号所在列 (列名或 1 起列号)")
+    src.add_argument("--sheet", help="--runs 为 xlsx 时的工作表名 [第一个]")
     src.add_argument("-r", "--run-identifiers", nargs="+", help="直接给 run 号")
     src.add_argument("-p", "--bioprojects", nargs="+", help="BioProject / SRP 号, 先查出全部 run")
     src.add_argument("--exclude", help="已下载 run 列表 (每行第一列), 跳过 (同旧脚本 --compared-files)")
@@ -245,7 +247,7 @@ def main(argv):
         if not path.exists():
             print(f"[06_download] 找不到 run 清单 {path}: 先运行 organise-sra select, 或用 --runs / -r / -p")
             return 1
-        runs, bad = read_runs(path)
+        runs, bad = read_runs(path, a.column, a.sheet)
         src_desc = str(path)
     runs = list(dict.fromkeys(runs))
     excl = read_exclude(a.exclude)

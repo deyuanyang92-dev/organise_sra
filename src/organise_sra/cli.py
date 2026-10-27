@@ -6,10 +6,12 @@
   organise-sra select Polynoidae --type RNA-Seq --top 1 --tag rna   # 只换筛选条件
   organise-sra download Polynoidae                   # 用 kingfisher 下载 run_list_default.txt, 可断点续跑
   organise-sra download 我的项目 --runs list.txt      # 任意 run 列表 (也可 -r SRR.. / -p PRJNA..)
+  organise-sra lineage samples.xlsx --column Run     # 给表/清单补物种名与门–种阶元
   organise-sra <步骤> -h                              # 各步骤参数
 
 步骤: runinfo(01) annotate(02) taxonomy(03) table(04) select(05); 每步只读上一步的 TSV、只写自己的,
-失败的步骤修复后可单独重跑. all = 01–05 (不下载); download(06) 单独运行, 调用 kingfisher get.
+失败的步骤修复后可单独重跑. all = 01–05 (不下载); download(06) 单独运行, 调用 kingfisher get;
+lineage = 只跑 runinfo+taxonomy, 把阶元写回用户自己的表.
 """
 import importlib
 import sys
@@ -18,7 +20,7 @@ from . import __version__
 
 STEPS = [("runinfo", "runinfo"), ("annotate", "annotate"), ("taxonomy", "taxonomy"),
          ("table", "table"), ("select", "selection")]
-EXTRA = [("download", "download")]                 # 不在 all 里: 下载要单独确认
+EXTRA = [("download", "download"), ("lineage", "lineage")]   # 不在 all 里
 ALIAS = {f"{i:02d}": name for i, (name, _) in enumerate(STEPS + EXTRA, start=1)}
 
 

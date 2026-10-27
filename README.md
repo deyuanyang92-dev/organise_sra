@@ -7,7 +7,8 @@
 3. **分类阶元**：TaxID → 门/纲/目/科/属/种（NCBI Taxonomy）
 4. **数据类型**：自动区分浅层 WGS（genome skimming）、深度 WGS、长读长 WGS、转录组、Hi-C、宏基因组等
 5. **Excel 总表 + 下载清单**：`run_list_<tag>.txt`
-6. **批量下载**（`download`）：调用 [kingfisher](https://github.com/wwood/kingfisher-download) 并行下载 fastq.gz，md5 校验、断点续跑、失败清单可直接重跑；也可下载任意 SRR 列表或 BioProject
+6. **已有 SRR 清单 / 表格 → 分类阶元**（`lineage`）：给 SRR 列表，或 TSV/CSV/Excel 中的某一列，在原表后面补上物种名和门/纲/目/科/属/种
+7. **批量下载**（`download`）：调用 [kingfisher](https://github.com/wwood/kingfisher-download) 并行下载 fastq.gz，md5 校验、断点续跑、失败清单可直接重跑；也可下载任意 SRR 列表或 BioProject
 
 下载本身由 kingfisher 完成（需另装，见 [docs/kingfisher.md](docs/kingfisher.md)）；盘点步骤 01–05 不需要 kingfisher。
 
@@ -34,9 +35,19 @@ NCBI API key 可选（有 key 快约 3 倍）：`--api-key`，或环境变量 `N
 organise-sra all Polynoidae                              # 类群名 → ./Polynoidae_sra/
 organise-sra all Polynoidae --query 'WGS[Strategy]'      # 追加 Entrez 子句
 organise-sra all 我的项目 --runs list.txt                 # SRR/ERR/DRR 列表, 一行一个
+organise-sra all 我的项目 --runs samples.xlsx --column Run   # 表格中的一列 (TSV/CSV/xlsx)
 organise-sra all 我的项目 --runinfo SraRunInfo.csv        # 网页 Send to → File → RunInfo
 organise-sra select Polynoidae --type RNA-Seq --top 1 --tag rna   # 换条件重新筛选 (不必重跑前几步)
 organise-sra annotate Polynoidae --kingfisher kf.tsv     # 元数据改用已有的 kingfisher annotate -a 结果 (自动修复其乱码)
+
+# 已有 SRR 清单或表格 → 补物种名与门–种阶元 (原表全部列保留, 新列加在后面)
+organise-sra lineage sra_list.txt                        # 一行一个 SRR/ERR/DRR
+organise-sra lineage samples.xlsx --column Run           # 指定列: 列名或 1 起列号 (如 --column 3)
+organise-sra lineage samples.tsv                         # 不给 --column: 自动取 SRR 号最多的列
+organise-sra lineage samples.xlsx --sheet Sheet2 --full  # 指定工作表; --full 另出样本属性与 Excel 总表
+#   -> samples_sra/samples_lineage.tsv 和 .xlsx
+#      新列: ScientificName TaxID rank phylum class order family genus species BioProject LibraryStrategy Platform Gb lineage_note
+#      一格多个 run (SRR1;SRR2) 会合并; 查不到的写在 lineage_note; 与原表重名的列加 _sra 后缀, 不覆盖
 
 # 下载 (调用 kingfisher; 中断后重跑同一命令即续传)
 organise-sra download Polynoidae                         # run_list_default.txt -> Polynoidae_sra/fastq/
@@ -64,6 +75,7 @@ bash scripts/install_kingfisher.sh      # conda 环境 kingfisher, kingfisher 0.
 | `taxonomy` (03) | → `taxonomy.tsv` | phylum/class/order/family/genus/species，含已合并的旧 TaxID |
 | `table` (04) | → `table.tsv`、`samples.tsv`、`species_summary.tsv`、`<Taxon>_SRA_<date>.xlsx` | 按 Run/TaxID 合并（行数不变）；派生数据类型与 `BioProject_derived`（RunInfo 为空时用 XML 回填）；Excel：Summary / Samples / 各类型 / Runs / QC / Query |
 | `select` (05) | → `selected_<tag>.tsv`、`run_list_<tag>.txt` | 每 TaxID×BioProject×类型取数据量最大的 `--top` 个样本（带上样本全部 run）；`--type`、`--platform`、`--layout PAIRED\|SINGLE\|ALL`、`--per run` |
+| `lineage` (不在 `all` 中) | SRR 清单或 TSV/CSV/xlsx 的一列 → `<文件名>_lineage.tsv/.xlsx` | = runinfo + taxonomy 两步，结果按行写回原表；`--column`、`--sheet`、`--full` |
 | `download` (06，不在 `all` 中) | `run_list_<tag>.txt` / `--runs` / `-r` / `-p` → `fastq/`、`download_status.tsv`、`runs_failed.txt`、`download_history.tsv` | 每个 run 一次 `kingfisher get`，`-j` 并行；成功写 `fastq/.done/<run>.json`；已有文件做 gzip/成对检查后才跳过 |
 
 ## 数据类型（`category_derived`，阈值在 `rules.json`，可用 `table --rules` 换）

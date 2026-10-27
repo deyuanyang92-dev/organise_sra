@@ -4,6 +4,7 @@
   organise-sra runinfo Polynoidae                      # 类群名 -> txid<id>[Organism:exp], 分页取全
   organise-sra runinfo Polynoidae --query 'WGS[Strategy]'   # 追加 Entrez 子句
   organise-sra runinfo <项目名> --runs list.txt          # SRR/ERR/DRR 列表 (一行一个)
+  organise-sra runinfo <项目名> --runs samples.xlsx --column Run   # 任意表格中的一列
   organise-sra runinfo <项目名> --runinfo SraRunInfo.csv  # 网页下载的 RunInfo
 输出 (--outdir, 默认 ./<taxon>_sra): runinfo.tsv, manifest.json, (runs_not_found.txt)
 核对: 类群模式下 唯一 Experiment 数 必须 = esearch Count (db=sra 按 experiment 计数).
@@ -31,8 +32,14 @@ def fetch(eu, term):
     return r["count"], rows
 
 
-def read_runs(path):
-    """-> (合法 run 号, 非法条目); 空白/逗号分隔, 转大写, 去重保序."""
+def read_runs(path, column=None, sheet=None):
+    """-> (合法 run 号, 非法条目); 空白/逗号分隔, 转大写, 去重保序.
+    给 column (列名或 1 起列号) 或文件是 .xlsx 时, 按表读取该列 (不给 column 则自动找 run 号最多的列)."""
+    with open(path, "rb") as f:
+        is_xlsx = f.read(2) == b"PK"
+    if column or sheet or is_xlsx:
+        from .intable import runs_from_table
+        return runs_from_table(path, column, sheet)[:2]
     seen, bad = [], []
     for acc in re.split(r"[\s,;]+", Path(path).read_text(encoding="utf-8-sig")):
         acc = acc.strip().upper()
@@ -47,7 +54,9 @@ def main(argv, eutils=None):
     add_common(p)
     p.add_argument("--taxid")
     p.add_argument("--query")
-    p.add_argument("--runs")
+    p.add_argument("--runs", help="run 列表; 或任意 TSV/CSV/xlsx 表, 配合 --column")
+    p.add_argument("--column", help="--runs 为表格时, run 号所在列 (列名或 1 起列号); xlsx 不给则自动识别")
+    p.add_argument("--sheet", help="--runs 为 xlsx 时的工作表名 [第一个]")
     p.add_argument("--runinfo")
     p.add_argument("--max-experiments", type=int, default=200000)
     a, _ = p.parse_known_args(argv)
@@ -68,7 +77,7 @@ def main(argv, eutils=None):
                 return 1
         elif a.runs:
             m["mode"] = "runs"
-            want, bad = read_runs(a.runs)
+            want, bad = read_runs(a.runs, a.column, a.sheet)
             rows, total = [], 0
             for i in range(0, len(want), BATCH):
                 n, got = fetch(eu, " OR ".join(f"{x}[accn]" for x in want[i:i + BATCH]))
