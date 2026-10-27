@@ -1,0 +1,8 @@
+{
+ "low_max_gb": 0.5,
+ "shallow_max_gb": 10,
+ "long_platforms": ["PACBIO_SMRT", "OXFORD_NANOPORE"],
+ "other_platforms": ["CAPILLARY"],
+ "pcr_selections": ["PCR", "RT-PCR"],
+ "metagenomic_sources": ["METAGENOMIC", "METATRANSCRIPTOMIC"]
+}

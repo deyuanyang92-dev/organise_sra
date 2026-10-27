@@ -1,0 +1,6 @@
+﻿Run,ReleaseDate,spots,bases,size_MB,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,Platform,Model,SRAStudy,BioProject,ProjectID,Sample,BioSample,TaxID,ScientificName
+SRR1,2024-01-01,10,2000000000,800,SRX1,L1,WGS,RANDOM,GENOMIC,PAIRED,ILLUMINA,NovaSeq 6000,SRP1,PRJNA1,1,SRS1,SAMN1,46593,Polynoidae sp. 1
+SRR2,2024-01-01,10,1000000000,400,SRX1,L1,WGS,RANDOM,GENOMIC,PAIRED,ILLUMINA,NovaSeq 6000,SRP1,PRJNA1,1,SRS1,SAMN1,46593,Polynoidae sp. 1
+
+Run,ReleaseDate,spots,bases,size_MB,Experiment,LibraryName,LibraryStrategy,LibrarySelection,LibrarySource,LibraryLayout,Platform,Model,SRAStudy,BioProject,ProjectID,Sample,BioSample,TaxID,ScientificName
+SRR3,2025-01-01,10,5000000000,2000,SRX2,L2,RNA-Seq,cDNA,TRANSCRIPTOMIC,PAIRED,ILLUMINA,NovaSeq 6000,SRP2,PRJNA2,2,SRS2,SAMN2,46593.0,Harmothoe imbricata
