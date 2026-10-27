@@ -1,6 +1,6 @@
 # organise_sra 设计文档
 
-版本 0.1.0（2026-10-27）。来源：yzz 分类工作流 `sra` 模块（需求表见文末附录），拆为独立软件。
+版本 0.2.0（2026-10-28；0.1.0 为 2026-10-27）。来源：yzz 分类工作流 `sra` 模块（需求表见文末附录），拆为独立软件。
 
 ## 1. 定位
 
@@ -16,9 +16,9 @@
 | 取元数据（标题、样本属性） | organise_sra 内置（默认），或 kingfisher annotate 的结果（见 §5） |
 | 分类阶元（门–种） | organise_sra |
 | 数据类型判别、总表、筛选 | organise_sra |
-| 下载 fastq | **kingfisher**（推荐；organise_sra 只输出 run 清单与命令） |
+| 下载 fastq | **kingfisher**；organise_sra 的 `download`（0.2.0 起）只做批量调度、续传与核对，见 [kingfisher.md](kingfisher.md) |
 
-**不做**：下载与格式转换（kingfisher / sra-tools 已做得很好）；组装、注释；物种有效名校订（另用 WoRMS 工具）；图形界面。
+**不做**：自己实现下载与格式转换（交给 kingfisher / sra-tools）；组装、注释；物种有效名校订（另用 WoRMS 工具）；图形界面。
 
 ## 2. 设计原则
 
@@ -42,7 +42,9 @@
         │
   04 table ────► table.tsv, samples.tsv, species_summary.tsv, <Taxon>_SRA_<date>.xlsx
         │
-  05 select ───► selected_<tag>.tsv, run_list_<tag>.txt  ──►  kingfisher get
+  05 select ───► selected_<tag>.tsv, run_list_<tag>.txt
+        │
+  06 download ─► fastq/, download_status.tsv, runs_failed.txt   （调用 kingfisher get; 不在 all 中）
 ```
 
 | 文件 | 一行是 | 内容 |
@@ -152,7 +154,7 @@ yzz 的 `python3 yzz.py sra ...` 将改为调用本包（同 gb2taxonomy 的做�
 | 5 | 区分浅层 WGS / 全基因组 / 转录组等 | 用户 | ✅（阈值可改） |
 | 6 | 减少打开文件、手动整理 Excel | 用户 | ✅ |
 | 7 | 筛选后得到下载清单 | 用户旧脚本 | ✅ |
-| 8 | 不做下载，推荐 kingfisher | 用户 | ✅ |
+| 8 | 不自己实现下载，用 kingfisher | 用户 | ✅ |
 | 9 | 不按 BioProject 绕路、不用自由文本检索 | 实测 | ✅ |
 | 10 | 不硬编码 API key / 邮箱 | 旧脚本问题 | ✅ |
 | 11 | 失败不静默 | 旧脚本问题 + 实测 | ✅ |
@@ -162,4 +164,5 @@ yzz 的 `python3 yzz.py sra ...` 将改为调用本包（同 gb2taxonomy 的做�
 | 15 | 1.5 万 run 规模可在合理时间/内存内出 Excel | 实测 | ✅ |
 | 16 | 安装方便：只用 Python 标准库 | 用户 | ✅ |
 | 17 | 做成通用软件，上传 GitHub `organise_sra` | 用户 2026-10-27 | ✅ 0.1.0 |
+| 18 | 整合本地 kingfisher 批量下载脚本，方便以后下载（并行、md5、续传、BioProject、检查） | 用户 2026-10-28 | ✅ 0.2.0 `download` |
 | 18 | 元数据可用本工具或 kingfisher annotate | 用户 2026-10-27 | ✅ `annotate --kingfisher`（§5） |

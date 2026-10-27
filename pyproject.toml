@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "organise-sra"
-version = "0.1.0"
-description = "Inventory a taxon's NCBI SRA raw data: RunInfo + sample attributes + taxonomy + data type, Excel report and kingfisher run list"
+version = "0.2.0"
+description = "Inventory a taxon's NCBI SRA raw data: RunInfo + sample attributes + taxonomy + data type, Excel report, run list and resumable batch download via kingfisher"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"

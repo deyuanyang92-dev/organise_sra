@@ -49,6 +49,6 @@ def main(argv):
     summary("05_select", [f"{a.type} | {a.layout} | 每组前 {a.top} 个{'样本' if a.per == 'sample' else ' run'}",
                           f"{len(sel)} 个{'样本' if a.per == 'sample' else ' run'}, {len(runs)} run, 约 {gb:.1f} Gb",
                           f"-> {out}",
-                          f"下载示例: kingfisher get --run-identifiers-list {out} -m ena-ftp aws-http prefetch -f fastq.gz"])
+                          f"下载: organise-sra download {a.taxon}" + (f" --tag {a.tag}" if a.tag != "default" else "")])
     return 0
 

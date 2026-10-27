@@ -6,11 +6,12 @@
 2. **元数据**：实验/研究标题、研究摘要、提交单位、**样本全部属性**（采集地、经纬度、日期、凭证号、组织……），做法同 `kingfisher annotate`
 3. **分类阶元**：TaxID → 门/纲/目/科/属/种（NCBI Taxonomy）
 4. **数据类型**：自动区分浅层 WGS（genome skimming）、深度 WGS、长读长 WGS、转录组、Hi-C、宏基因组等
-5. **Excel 总表 + 下载清单**：`run_list_<tag>.txt` 直接交给 [kingfisher](https://github.com/wwood/kingfisher-download) 下载
+5. **Excel 总表 + 下载清单**：`run_list_<tag>.txt`
+6. **批量下载**（`download`）：调用 [kingfisher](https://github.com/wwood/kingfisher-download) 并行下载 fastq.gz，md5 校验、断点续跑、失败清单可直接重跑；也可下载任意 SRR 列表或 BioProject
 
-本软件**不下载 fastq**，下载推荐 kingfisher。
+下载本身由 kingfisher 完成（需另装，见 [docs/kingfisher.md](docs/kingfisher.md)）；盘点步骤 01–05 不需要 kingfisher。
 
-*English: inventory a taxon's NCBI SRA raw data (RunInfo + sample attributes + phylum–species lineage + inferred data type such as shallow vs. deep WGS), write an Excel report and a run list for `kingfisher get`. Pure Python standard library, no dependencies.*
+*English: inventory a taxon's NCBI SRA raw data (RunInfo + sample attributes + phylum–species lineage + inferred data type such as shallow vs. deep WGS), write an Excel report and a run list, and batch-download it with `kingfisher get` (parallel, md5-checked, resumable). Pure Python standard library, no dependencies.*
 
 ## 安装
 
@@ -37,9 +38,22 @@ organise-sra all 我的项目 --runinfo SraRunInfo.csv        # 网页 Send to �
 organise-sra select Polynoidae --type RNA-Seq --top 1 --tag rna   # 换条件重新筛选 (不必重跑前几步)
 organise-sra annotate Polynoidae --kingfisher kf.tsv     # 元数据改用已有的 kingfisher annotate -a 结果 (自动修复其乱码)
 
-# 下载 (kingfisher)
-kingfisher get --run-identifiers-list Polynoidae_sra/run_list_default.txt -m ena-ftp aws-http prefetch -f fastq.gz
+# 下载 (调用 kingfisher; 中断后重跑同一命令即续传)
+organise-sra download Polynoidae                         # run_list_default.txt -> Polynoidae_sra/fastq/
+organise-sra download Polynoidae --tag rna -j 4          # 下 select --tag rna 的清单, 同时 4 个 run
+organise-sra download 我的项目 --runs sra_list.txt        # 任意 SRR/ERR/DRR 列表
+organise-sra download 我的项目 -r SRR12118866             # 单个 run;  -p PRJNA621514 整个 BioProject
+organise-sra download 我的项目 --runs sra_list.txt --check-only   # 只检查哪些已下好
 ```
+
+### 安装 kingfisher（下载才需要）
+
+```bash
+bash scripts/install_kingfisher.sh      # conda 环境 kingfisher, kingfisher 0.5.0 + ascp
+# 或: mamba create -n kingfisher -c conda-forge -c bioconda kingfisher=0.5.0
+```
+
+不必 `conda activate`：`download` 会自动找 `~/miniforge3/envs/kingfisher/bin/kingfisher`。下载方法默认 `-m aws-http prefetch ena-ftp`（本机实测，ena-ascp 经代理不通）。方法对比、全部选项、Snakemake 用法、常见报错见 **[docs/kingfisher.md](docs/kingfisher.md)**。
 
 公共选项：`-o/--outdir`（默认 `./<taxon>_sra`）、`--report-dir`（Excel 位置，默认同 outdir）、`--email`、`--api-key`。各步骤参数见 `organise-sra <步骤> -h`。
 
@@ -50,6 +64,7 @@ kingfisher get --run-identifiers-list Polynoidae_sra/run_list_default.txt -m ena
 | `taxonomy` (03) | → `taxonomy.tsv` | phylum/class/order/family/genus/species，含已合并的旧 TaxID |
 | `table` (04) | → `table.tsv`、`samples.tsv`、`species_summary.tsv`、`<Taxon>_SRA_<date>.xlsx` | 按 Run/TaxID 合并（行数不变）；派生数据类型与 `BioProject_derived`（RunInfo 为空时用 XML 回填）；Excel：Summary / Samples / 各类型 / Runs / QC / Query |
 | `select` (05) | → `selected_<tag>.tsv`、`run_list_<tag>.txt` | 每 TaxID×BioProject×类型取数据量最大的 `--top` 个样本（带上样本全部 run）；`--type`、`--platform`、`--layout PAIRED\|SINGLE\|ALL`、`--per run` |
+| `download` (06，不在 `all` 中) | `run_list_<tag>.txt` / `--runs` / `-r` / `-p` → `fastq/`、`download_status.tsv`、`runs_failed.txt`、`download_history.tsv` | 每个 run 一次 `kingfisher get`，`-j` 并行；成功写 `fastq/.done/<run>.json`；已有文件做 gzip/成对检查后才跳过 |
 
 ## 数据类型（`category_derived`，阈值在 `rules.json`，可用 `table --rules` 换）
 
