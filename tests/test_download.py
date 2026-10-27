@@ -185,8 +185,8 @@ def test_probe_ascp_needs_real_file_and_caches(tmp_path, monkeypatch):
     from conftest import REAL_PROBE_ASCP as probe
     assert probe(str(fake), "k") is False
     good = tmp_path / "ascp_ok"
-    good.write_text("#!/bin/sh\nfor a; do d=$a; done; head -c %d /dev/zero > $d/SRR12118866_1.fastq.gz\n"
-                    % tools.PROBE_FILE[1])
+    good.write_text(f"#!/bin/sh\nfor a; do d=$a; done; head -c {tools.PROBE_FILE[1]} /dev/zero "
+                    "> $d/SRR12118866_1.fastq.gz\n")
     good.chmod(0o755)
     assert probe(str(good), "k") is False                    # 6 小时内用缓存
     assert probe(str(good), "k", refresh=True) is True
