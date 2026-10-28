@@ -165,6 +165,32 @@ class Eutils:
         return {"count": int(r.get("count", 0)), "webenv": r.get("webenv", ""),
                 "query_key": r.get("querykey", ""), "ids": r.get("idlist", [])}
 
+    def esearch_ids(self, db, term, page=10000):
+        """-> 全部 UID (不用 history; 每页 10000 个, 约 1 s, 页间并行). 增量更新用来比对新增/删除."""
+        def one(start):
+            body = self.get("esearch.fcgi", {"db": db, "term": term, "retstart": start, "retmax": page,
+                                             "retmode": "json"}, expect="json")
+            r = json.loads(body)["esearchresult"]
+            return int(r.get("count", 0)), r.get("idlist", [])
+        n, ids = one(0)
+        for _, more in self.map_parallel(one, range(page, n, page)):
+            ids += more
+        return list(dict.fromkeys(ids))
+
+    def sra_experiments(self, uids, batch=200):
+        """db=sra UID -> Experiment 号 (esummary; 已删除/撤回的 UID 查不到则不在结果中)."""
+        out = {}
+        for body in self.map_parallel(lambda b: self.get("esummary.fcgi", {"db": "sra", "id": ",".join(b),
+                                                                           "retmode": "json"}, expect="json"),
+                                      [uids[i:i + batch] for i in range(0, len(uids), batch)]):
+            res = json.loads(body).get("result", {})
+            for u in res.get("uids", []):
+                x = res.get(u, {}).get("expxml", "")
+                i = x.find('<Experiment acc="')
+                if i >= 0:
+                    out[u] = x[i + 17:x.find('"', i + 17)]
+        return out
+
     def efetch_history(self, db, webenv, query_key, count, rettype="", retmode="xml", page=500):
         """-> 各页响应列表 (按 retstart 顺序), 页间并行."""
         expect = "xml" if retmode == "xml" else "runinfo" if rettype == "runinfo" else None

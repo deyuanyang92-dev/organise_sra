@@ -3,7 +3,9 @@
 用法: organise-sra table <Taxon> [--rules rules.json]
 输入: runinfo.tsv (必需), annotate.tsv, taxonomy.tsv, manifest.json (可缺)
 输出: table.tsv, samples.tsv, species_summary.tsv, <Taxon>_SRA_<date>.xlsx (--report-dir)
+输入三表与规则都没变 (table.stamp.json 记录其 sha1) 且输出还在时跳过, 沿用上次的 Excel; --full 强制重做.
 """
+import hashlib
 import argparse
 import json
 from collections import Counter
@@ -86,12 +88,34 @@ def qc_table(cols, t, d, manifest, rules):
     return ["issue", "Run", "detail"], rows
 
 
+def fingerprint(d, rules, xlsx_dir):
+    h = hashlib.sha1(json.dumps([rules, str(xlsx_dir)], sort_keys=True).encode())
+    for n in ("runinfo.tsv", "annotate.tsv", "taxonomy.tsv"):
+        f = d / n
+        if f.exists():
+            with open(f, "rb") as x:
+                for b in iter(lambda: x.read(1 << 20), b""):
+                    h.update(b)
+        h.update(n.encode())
+    return h.hexdigest()
+
+
 def main(argv):
     p = argparse.ArgumentParser()
     add_common(p)
     p.add_argument("--rules")
+    p.add_argument("--full", action="store_true", help="输入没变也重做")
     a, _ = p.parse_known_args(argv)
     d = data_dir(a)
+    stamp = d / "table.stamp.json"
+    fp = fingerprint(d, load_rules(a.rules), report_dir(a))
+    try:
+        old = json.loads(stamp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        old = {}
+    if not a.full and old.get("sha1") == fp and Path(old.get("xlsx", "")).exists() and (d / "table.tsv").exists():
+        summary("04_table", ["输入与上次相同, 跳过 (要重做加 --full)", f"-> {old['xlsx']}"])
+        return 0
     runinfo = read_tsv(d / "runinfo.tsv")
     annotate = read_tsv(d / "annotate.tsv", required=False)
     taxonomy = read_tsv(d / "taxonomy.tsv", required=False)
@@ -125,6 +149,7 @@ def main(argv):
         if not c:
             sheets[name] = (["(empty)"], [])
     path = write_xlsx(report_dir(a) / f"{a.taxon}_SRA_{TODAY}.xlsx", sheets)
+    stamp.write_text(json.dumps({"sha1": fp, "xlsx": str(path), "date": TODAY}), encoding="utf-8")
 
     counts = Counter(r["category_derived"] for r in t)
     top = ", ".join(f"{c} {counts[c]}" for c in ordered_categories(counts)[:6])

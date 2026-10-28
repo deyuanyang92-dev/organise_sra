@@ -73,8 +73,9 @@ def _sheet(zf, i, cols, rows):
                 + "</row>")
         f.write(head.encode("utf-8"))
         buf = []
+        letters = [col_letter(j) for j in range(len(cols))]
         for n, r in enumerate(rows, start=2):
-            cells = "".join(_cell(f"{col_letter(j)}{n}", v) for j, v in enumerate(r) if v is not None and v != "")
+            cells = "".join(_cell(f"{letters[j]}{n}", v) for j, v in enumerate(r) if v is not None and v != "")
             buf.append(f'<row r="{n}">{cells}</row>')
             if len(buf) >= 500:
                 f.write("".join(buf).encode("utf-8"))
@@ -92,7 +93,8 @@ def write_xlsx(path, sheets):
         path = path.with_name(f"{path.stem}_{datetime.datetime.now():%H%M}{path.suffix}")
         print(f"   (原文件被占用, 另存为 {path.name})")
     names = [n[:31] for n in sheets]
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+    # compresslevel 1: Annelida 1.5M 格 压缩 1.2 s -> 0.4 s, 文件大 ~15%
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         zf.writestr("[Content_Types].xml",
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
                     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'

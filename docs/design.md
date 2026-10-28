@@ -1,6 +1,6 @@
 # organise_sra 设计文档
 
-版本 0.4.0（2026-10-28；0.1.0 为 2026-10-27）。来源：yzz 分类工作流 `sra` 模块（需求表见文末附录），拆为独立软件。
+版本 0.5.0（2026-10-28；0.1.0 为 2026-10-27）。来源：yzz 分类工作流 `sra` 模块（需求表见文末附录），拆为独立软件。
 
 ## 1. 定位
 
@@ -112,7 +112,7 @@ organise-sra select <taxon> --type shallow_WGS,deep_WGS,RNA-Seq --platform ILLUM
 | 合并错位 | 按 Run / TaxID 合并，断言行数不变（旧脚本按行号拼表曾错位） |
 | 大类群 | Excel 流式写入；Annelida 14,641 run × 369 列：全流程约 8 分钟、峰值 0.7 GB |
 
-测试：离线单元测试 73 个（假 HTTP 传输）；联网回归 `tests/check_polynoidae.py`。
+测试：离线单元测试 101 个（假 HTTP 传输）；联网回归 `tests/check_polynoidae.py`。
 
 ## 8. 路线图
 
@@ -123,7 +123,7 @@ organise-sra select <taxon> --type shallow_WGS,deep_WGS,RNA-Seq --platform ILLUM
 | 0.2 | `geo_loc_name_derived`、`lat_lon_derived`：把 ENA 系属性（`geographic location (country and/or sea)`、`(region and locality)`、`(latitude)`、`(longitude)`）归一到同一列 | 实测 Polynoidae 85 个 ERR run 的 `geo_loc_name` 全空，地名在另一套属性名里；所有工具都没做 |
 | 0.2 | `organise-sra download <taxon> [--tag] [--threads]`：生成 `download_<tag>.sh`（kingfisher get 命令、方法回退顺序、输出目录、断点续跑）；`--execute` 在 PATH 有 kingfisher 时直接执行 | 用户分工：下载用 kingfisher；本软件只把命令写全、写对 |
 | 0.2 | `--runs` 直接接受 `runs_not_found.txt` / `annotate_missing.txt` 重试 | 借鉴 q2-fondue 失败项回灌 |
-| 0.3 | 增量更新：读上次的 `runinfo.tsv`，只取新增 run 的注释与阶元 | 需求 12；Annelida 全量约 8 分钟 |
+| ~~0.3~~ 0.5 ✓ | 增量更新：UID 比对新增/删除 + `[MDAT]` 修改日期找修改；annotate 只重取变化 run；table 输入不变跳过 | 需求 12；Annelida 再跑 2.7 分钟 → 7 秒，结果与全量一致 |
 | 0.3 | 覆盖度估算：按同种/同属基因组大小（GoaT API）把 Gb 换成 ×，浅层/深度按覆盖度判 | 需求 13；数据量阈值对基因组大小差异大的类群不准 |
 | 0.3 | 可选列：机构地址、read 长度均值/标准差（XML `Statistics`） | 实测 kingfisher 有、我们没有 |
 | 0.4 | 下载清单附 ENA md5 与文件大小（ENA filereport，只对已知 run，不作入口） | 借鉴 ffq；ENA 不作类群入口（实测召回 48%） |
@@ -170,4 +170,5 @@ yzz 的 `python3 yzz.py sra ...` 将改为调用本包（同 gb2taxonomy 的做�
 | 21 | ascp 装好并测通 | 用户 2026-10-28 | ⚠️ 已装、找到可用密钥；本机网络 SSH 握手被干扰，需代理 TUN 模式（见 kingfisher.md §6.4）；自动检测，通了才用 |
 | 22 | 自动整理某科/门/种的全基因组组装数据，免去手动筛选 | 用户 2026-10-28 | ✅ 0.4.0 `genome` |
 | 23 | 分类阶元与元数据获取要高效 | 用户 2026-10-28 | ✅ 0.4.0 直连+并行+缓存，Polynoidae 45 s → 12 s |
+| 24 | 一次获取后只检查变化部分，更新要快 | 用户 2026-10-28 | ✅ 0.5.0 增量更新（UID 比对 + MDAT），Annelida 再跑 2.7 分钟 → 7 秒 |
 | 18 | 元数据可用本工具或 kingfisher annotate | 用户 2026-10-27 | ✅ `annotate --kingfisher`（§5） |

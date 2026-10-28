@@ -41,6 +41,12 @@ organise-sra all 我的项目 --runinfo SraRunInfo.csv        # 网页 Send to �
 organise-sra select Polynoidae --type RNA-Seq --top 1 --tag rna   # 换条件重新筛选 (不必重跑前几步)
 organise-sra annotate Polynoidae --kingfisher kf.tsv     # 元数据改用已有的 kingfisher annotate -a 结果 (自动修复其乱码)
 
+# 增量更新 (0.5.0 默认): 同一输出目录再跑一次, 只取 NCBI 上新增/修改/删除的部分
+organise-sra all Annelida                                # 第一次全量 ~2.7 分钟; 之后无变化 ~7 秒
+#   -> Annelida_sra/runs_new.txt (本次新增 run), update_history.tsv (每次新增/更新/删除记录)
+organise-sra download Annelida --runs Annelida_sra/runs_new.txt   # 只下新增的
+organise-sra all Annelida --full                         # 强制全量 (旧行为); 距上次全量 >30 天也自动全量 (--full-days)
+
 # 已有 SRR 清单或表格 → 补物种名与门–种阶元 (原表全部列保留, 新列加在后面)
 organise-sra lineage sra_list.txt                        # 一行一个 SRR/ERR/DRR
 organise-sra lineage samples.xlsx --column Run           # 指定列: 列名或 1 起列号 (如 --column 3)
@@ -116,8 +122,10 @@ NCBI 没有"浅层"字段，按样本数据量推断。原列不改，派生列�
 | Annelida taxonomy（1,087 个 TaxID） | — | 约 35 秒 | **9 秒**（缓存命中 1 秒） | — |
 | `lineage` 1,000 个 run | 1,000 | — | **11–13 秒** | — |
 | `genome Nereididae`（含 01–04） | 1,553 | — | **21 秒** | — |
+| Annelida `all` 再跑（增量，NCBI 无变化） | 14,641 | 约 2.7 分钟（全量） | **7 秒**（0.5.0） | — |
+| Annelida `all` 再跑（新增 50、修改 25 个 run） | 14,641 | 同上 | **27 秒**（0.5.0；其中重写 Excel 9 秒） | — |
 
-提速做法（2026-10-28）：① 自动直连 NCBI（本机经 http 代理每个请求多 ~3.5 s），但请求体 >1.2 KB 时走代理（直连这类请求会卡死，见 eutils.py `DIRECT_MAX`）；② 请求按 NCBI 限速（无 key 3 次/秒、有 key 10 次/秒）**并行**，XML 每页 100 条（实测比 500 条快 45%）；③ annotate 复用 runinfo 的检索结果，`--runs` 模式直接按 run 号 efetch（每批省一次 esearch）；④ 阶元本地缓存 `~/.cache/organise_sra/taxonomy.tsv`（90 天）。设 NCBI API key 可再快约 2–3 倍。`--ncbi-proxy direct|env` 可强制连接方式。
+提速做法（2026-10-28）：① 自动直连 NCBI（本机经 http 代理每个请求多 ~3.5 s），但请求体 >1.2 KB 时走代理（直连这类请求会卡死，见 eutils.py `DIRECT_MAX`）；② 请求按 NCBI 限速（无 key 3 次/秒、有 key 10 次/秒）**并行**，XML 每页 100 条（实测比 500 条快 45%）；③ annotate 复用 runinfo 的检索结果，`--runs` 模式直接按 run 号 efetch（每批省一次 esearch）；④ 阶元本地缓存 `~/.cache/organise_sra/taxonomy.tsv`（90 天）。⑤（0.5.0）增量更新：列出全部 SRA UID（每 1 万个约 1 秒）与上次比对得新增/删除，再按修改日期 `[MDAT]` 找修改过的 experiment，只重取这些；输入不变时 table 跳过不重写 Excel。实测增量结果与全量逐行逐列一致。设 NCBI API key 可再快约 2–3 倍。`--ncbi-proxy direct|env` 可强制连接方式。
 
 与其他工具的对比见 [docs/benchmark.md](docs/benchmark.md)，设计见 [docs/design.md](docs/design.md)。
 

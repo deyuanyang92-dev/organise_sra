@@ -4,6 +4,8 @@
       organise-sra annotate <Taxon> --kingfisher kf.tsv   # 改用 kingfisher annotate -a 的结果, 不联网
 输入: runinfo.tsv (01)   输出: annotate.tsv (以 Run 为键), annotate_missing.txt
 XML 中缺失的 run 超过 1% 时退出码 1.
+增量 (01 为增量时): 保留上次 annotate.tsv 中未变的 run, 只重取 runs_changed.txt 与上次缺的 run;
+  要重取的超过一半时仍按全量取. --full 强制全量.
 """
 import argparse
 import csv
@@ -47,16 +49,28 @@ def main(argv, eutils=None):
     p = argparse.ArgumentParser()
     add_common(p)
     p.add_argument("--kingfisher", help="kingfisher annotate -a -f tsv 的输出; 给了就不联网")
+    p.add_argument("--full", action="store_true", help="不增量, 全部重取")
     a, _ = p.parse_known_args(argv)
     eu = eutils or Eutils(*identity(a))
     d = data_dir(a)
     runs = [r["Run"] for r in read_tsv(d / "runinfo.tsv")[1] if r.get("Run")]
     mf = d / "manifest.json"
     manifest = json.loads(mf.read_text(encoding="utf-8")) if mf.exists() else {}
-    rows = []
+    rows, kept = [], {}
+    if manifest.get("incremental") and not a.full and not a.kingfisher and (d / "annotate.tsv").exists():
+        changed = set((d / "runs_changed.txt").read_text().split()) if (d / "runs_changed.txt").exists() else set()
+        want = set(runs)
+        kept = {r["Run"]: r for r in read_tsv(d / "annotate.tsv")[1] if r["Run"] in want and r["Run"] not in changed}
+        if len(runs) - len(kept) > len(runs) / 2:
+            kept = {}
+    todo = [x for x in runs if x not in kept]
     try:
         if a.kingfisher:
             rows = read_kingfisher(a.kingfisher)
+        elif kept:
+            for page in eu.map_parallel(lambda b: eu.efetch_ids("sra", b),
+                                        [todo[i:i + ACC_BATCH] for i in range(0, len(todo), ACC_BATCH)]):
+                rows += parse_sra_packages(page)
         elif manifest.get("mode") == "taxon" and manifest.get("term"):
             # 类群模式: 复用 01 的检索 (WebEnv 1 小时内有效, 否则重新 esearch), 每页 XML_PAGE, 页间并行
             h = manifest.get("history") or {}
@@ -80,16 +94,30 @@ def main(argv, eutils=None):
         print(f"[02_annotate] 失败: {e}")
         return 1
     want, got = set(runs), {}
-    for x in rows:
+    for x in rows:                                  # 新取的优先于沿用的
         if x["Run"] in want and x["Run"] not in got:
             got[x["Run"]] = x
-    df = list(got.values())
+    again = [x for x in todo if x not in got]
+    if again and not a.kingfisher and len(again) <= 2000:
+        # 补取一次: 2026-10-28 Annelida 增量, 刚修改的 4 个 run 在批量 efetch 中缺失, 单独再取即有 (NCBI 更新中)
+        try:
+            for page in eu.map_parallel(lambda b: eu.efetch_ids("sra", b),
+                                        [again[i:i + ACC_BATCH] for i in range(0, len(again), ACC_BATCH)]):
+                for x in parse_sra_packages(page):
+                    if x["Run"] in want and x["Run"] not in got:
+                        got[x["Run"]] = x
+        except EutilsError:
+            pass
+    got = {**kept, **got}
+    df = [got[x] for x in runs if x in got]
     cols = columns(df) if df else ["Run"]
     missing = [x for x in runs if x not in got]
     (d / "annotate_missing.txt").write_text("".join(x + "\n" for x in missing))
     write_tsv(d / "annotate.tsv", cols, df)
     bad = len(runs) and len(missing) / len(runs) > 0.01
     src = f" (来自 kingfisher: {a.kingfisher})" if a.kingfisher else ""
+    if kept:
+        src += f"; 增量: 沿用 {len(kept)}, 重取 {len(todo)}"
     lines = [f"{len(df)}/{len(runs)} run 取到注释, {len(cols) - 1} 列 (含样本属性){src}", f"-> {d / 'annotate.tsv'}"]
     if missing:
         lines.append(f"{'错误' if bad else '警告'}: {len(missing)} 个 run 无 XML 记录, 见 annotate_missing.txt")

@@ -165,6 +165,9 @@ rule kingfisher:
 8. **直连 NCBI E-utilities 时较大的请求卡 20 s 后 `HTTP Error 408: Request Timeout`**（2026-10-28，taxonomy 并行 200 个 TaxID 时出现）
    原因：本机直连 NCBI 时，请求体（POST）或 URL（GET）超过约 1.3 KB 就发不出去（1300 B 正常、1400 B 起必卡；响应再大都没问题），像路径 MTU 黑洞。经代理没有此问题，但每个请求固定多 ~3.5 s。
    解决：eutils 默认 auto：小请求直连、>1200 B 走代理（`DIRECT_MAX`）；taxonomy 每批 100 个 TaxID、`--runs` 每批 70 个 run 号，都控制在 1.2 KB 内；直连失败 2 次后该请求改走代理。`--ncbi-proxy direct|env` 可强制。
+9. **增量更新时 annotate 报 4 个 run "无 XML 记录"**（2026-10-28，Annelida，均为当天刚修改的 run）
+   原因：批量 efetch 返回的 XML 合法但少了这几个 EXPERIMENT_PACKAGE；随后单独再取全部都有，判断为 NCBI 记录更新中的暂时缺失。
+   解决：annotate 对缺失的 run（≤2000 个）按 run 号再补取一次；补取后 14,641/14,641 齐全，与全量结果逐列一致。
 
 ## 7. 用户旧脚本对照（2026-10-28 盘点）
 
